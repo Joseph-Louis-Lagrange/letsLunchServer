@@ -23,7 +23,7 @@ async function connect() {
 
     // Create a new SODA collection and index
     // This will open an existing collection, if the name is already in use.
-    collection = await soda.createCollection("messages");
+    collection = await soda.createCollection("letsLunch");
 
     return soda;
 }
@@ -31,93 +31,92 @@ async function connect() {
 module.exports.countAll = async function () {
     try {
         // Count all documents
-        res = await collection.find().count();
+        var res = await collection.find().count();
         return 'Collection has ' + res.count + ' documents';
     } catch (err) {
         console.error(err);
-    } finally {
-        if (collection) {
-
-        }
-        if (conn) {
-            /*   try {
-                 await conn.close();
-               } catch (err) {
-                 console.error(err);
-               }*/
-        }
     }
 }
 
-module.exports.insertMessage = async function (userName, messageText) {
+module.exports.findAll = async function (docType) {
     try {
-        let doc;
-
-		/*const indexSpec = { "name": "Message_Text_IDX",
-		  "fields": [ {
-			"path": "msgText",
-			"datatype": "string",
-			"order": "asc" } ] };
-		await collection.createIndex(indexSpec);*/
-
-        // Insert a document.
-        // A system generated key is created by default.
-        let message = { username: userName, msgText: messageText };
-        console.log(message);
-        doc = await collection.insertOneAndGet(message);
-        const key = doc.key;
-        console.log("The key of the new SODA document is: ", key);
-
-
+        var count = await collection.find().filter({"docType": docType}).count();
+        var res = await collection.find().filter({"docType": docType}).getDocuments();
+        for(i=0; i<res.length; i++){
+            res[i] = convertSodaDocumentToNormalJson(res[i], docType);
+        }
+        return {count: count.count, results: res};
     } catch (err) {
         console.error(err);
-    } finally {
-        if (collection) {
-
-        }
-        if (conn) {
-            /*   try {
-                 await conn.close();
-               } catch (err) {
-                 console.error(err);
-               }*/
-        }
     }
 }
 
-module.exports.dropCollection = async function () {
-
+module.exports.findById = async function (id, docType) {
     try {
-        let soda, content, doc, documents, res;
-
-        conn = await oracledb.getConnection(dbConfig);
-        console.log(conn);
-
-        // Create the parent object for SODA
-        soda = conn.getSodaDatabase();
-
-        // Create a new SODA collection and index
-        // This will open an existing collection, if the name is already in use.
-        collection = await soda.createCollection("messages");
-
-        console.log(collection);
-
+        var res = await collection.find().key(id).getOne();
+        if(res){
+            res = convertSodaDocumentToNormalJson(res, docType);
+        }
+        return res;
     } catch (err) {
         console.error(err);
-    } finally {
-        if (collection) {
-            // Drop the collection
-            let res = await collection.drop();
-            if (res.dropped) {
-                console.log('Collection was dropped');
-            }
-        }
-        if (conn) {
-            try {
-                await conn.close();
-            } catch (err) {
-                console.error(err);
-            }
-        }
     }
+}
+
+module.exports.insertDocument = async function (doc, docType) {
+    try {
+        doc.docType = docType;
+        res = await collection.insertOneAndGet(doc);
+        res = convertSodaDocumentToNormalJson(res, docType);
+        return res;
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+module.exports.updateDocument = async function (id, doc, docType) {
+    try {
+        var res = await collection.find().key(id).getOne();
+        if(res){
+            res = convertSodaDocumentToNormalJson(res, docType);
+            if(res){
+                doc.docType = docType;
+                res = await collection.find().key(id).replaceOne(doc);
+                if(res && res.replaced){
+                    res = {_id: id};
+                }
+            }
+        }
+        return res;
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+module.exports.deleteById = async function (id, docType) {
+    try {
+        var res = await collection.find().key(id).remove();
+        if(res.count > 0){
+            res = {_id: id};
+        } else {
+            res = null;
+        }
+        return res;
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function convertSodaDocumentToNormalJson(sodaDocument, docType){
+    var result = sodaDocument.getContent();
+    if(result){
+        if(result.docType != docType){
+            return null;
+        }
+        result._id = sodaDocument.key;
+    } else {
+        return {_id: sodaDocument.key};
+    }
+    delete result.docType;
+    return result;
 }
